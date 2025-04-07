@@ -1,6 +1,5 @@
-# mqtt_listener.py
-
 #!/usr/bin/env python3
+
 import json
 import base64
 import paho.mqtt.client as mqtt
