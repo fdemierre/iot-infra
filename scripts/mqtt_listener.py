@@ -49,6 +49,8 @@ def on_message(client, userdata, msg):
         if decoded:
             print(f"📥 {dev_eui} → {decoded}")
             send_to_influx(dev_eui, decoded, timestamp)
+        else:
+            print(f"⚠️ Aucun champ décodé pour {dev_eui}")
     except Exception as e:
         print(f"❌ Erreur réception MQTT : {e}")
 
@@ -56,8 +58,10 @@ def send_to_influx(dev_eui, data, timestamp):
     client = InfluxDBClient(url=INFLUX_URL, token=INFLUX_TOKEN, org=INFLUX_ORG)
     write_api = client.write_api()
     for key, value in data.items():
-        point = Point(key).tag("dev_eui", dev_eui).field("value", value).time(timestamp)
-        write_api.write(bucket=INFLUX_BUCKET, record=point)
+        if isinstance(value, (int, float)):
+            val = float(value)  # force float pour éviter type conflict
+            point = Point(key).tag("dev_eui", dev_eui).field("value", val).time(timestamp)
+            write_api.write(bucket=INFLUX_BUCKET, record=point)
 
 client = mqtt.Client()
 client.username_pw_set(MQTT_USERNAME, MQTT_PASSWORD)
