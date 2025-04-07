@@ -1,11 +1,13 @@
-# install_influxdb.sh
-
+#!/bin/bash
 set -e
 
-echo "📦 Installation d'InfluxDB 2 via APT"
+echo "📦 Installation d'InfluxDB 2 via APT (dépôt jammy utilisé)"
+
+# Ajout de la clé GPG et du dépôt (version Ubuntu 22.04 jammy compatible)
+sudo mkdir -p /etc/apt/keyrings
 curl -s https://repos.influxdata.com/influxdb.key | sudo gpg --dearmor -o /etc/apt/keyrings/influxdb-archive-keyring.gpg
 
-echo "deb [signed-by=/etc/apt/keyrings/influxdb-archive-keyring.gpg] https://repos.influxdata.com/ubuntu $(lsb_release -cs) stable" | \
+echo "deb [signed-by=/etc/apt/keyrings/influxdb-archive-keyring.gpg] https://repos.influxdata.com/ubuntu jammy stable" | \
   sudo tee /etc/apt/sources.list.d/influxdb.list
 
 sudo apt update
