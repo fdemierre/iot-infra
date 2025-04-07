@@ -1,11 +1,13 @@
 #!/bin/bash
-# install_python_env.sh
-
 set -e
 
 echo "📦 Installation des dépendances Python"
 
-sudo apt update
+# Ne pas laisser échouer si un dépôt tiers est mal configuré
+sudo apt update -o Dir::Etc::sourcelist="sources.list" \
+                -o Dir::Etc::sourceparts="-" \
+                -o APT::Get::List-Cleanup="0"
+
 sudo apt install -y python3 python3-pip python3-venv
 
 echo "🧪 Création de l'environnement virtuel"
