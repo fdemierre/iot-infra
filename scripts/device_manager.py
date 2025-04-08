@@ -7,8 +7,8 @@ from pathlib import Path
 
 app = Flask(__name__)
 
-DEVICES_FILE = Path("devices.json")
-DECODER_DIR = Path("decoders")
+DEVICES_FILE = Path("/opt/iot-infra/devices.json")
+DECODER_DIR = Path("/opt/iot-infra/decoders")
 
 # Template HTML minimal
 TEMPLATE = """
@@ -54,6 +54,10 @@ TEMPLATE = """
             {% endfor %}
             </tbody>
         </table>
+
+        <form method="POST" action="/restart">
+            <button type="submit" class="btn btn-warning mt-4">🔄 Redémarrer le Listener MQTT</button>
+        </form>
     </div>
 </body>
 </html>
@@ -108,6 +112,11 @@ def delete(dev_eui):
     if dev_eui in devices:
         del devices[dev_eui]
         save_devices(devices)
+    return redirect(url_for("index"))
+
+@app.route("/restart", methods=["POST"])
+def restart_listener():
+    subprocess.run(["systemctl", "restart", "mqtt_listener"])  # Assumes systemd service exists
     return redirect(url_for("index"))
 
 if __name__ == "__main__":
