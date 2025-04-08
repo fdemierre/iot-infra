@@ -78,7 +78,7 @@ client.on_message = on_message
 print(f"📡 Connexion MQTT à {MQTT_HOST}...")
 client.connect(MQTT_HOST, 1883, 60)
 
-topic = f"v3/{TTN_USERNAME.split('@')[0]}/devices/+/up"
+topic = f"v3/{TTN_USERNAME}/devices/+/up"
 client.subscribe(topic)
 
 client.loop_forever()
