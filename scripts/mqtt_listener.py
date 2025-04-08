@@ -1,73 +1,84 @@
 #!/usr/bin/env python3
-
-import json
-import base64
-import paho.mqtt.client as mqtt
-from dotenv import load_dotenv
 import os
-from influxdb_client import InfluxDBClient, Point
-from datetime import datetime
-import importlib
+import json
+import paho.mqtt.client as mqtt
+from influxdb_client import InfluxDBClient, Point, WriteOptions
+from dotenv import load_dotenv
+from importlib import import_module
 
-load_dotenv()
+# 📦 Charger les variables d'environnement
+load_dotenv("/opt/iot-infra/.env")
 
 MQTT_HOST = os.getenv("MQTT_HOST")
-MQTT_USERNAME = os.getenv("TTN_USERNAME")
-MQTT_PASSWORD = os.getenv("TTN_PASSWORD")
-MQTT_TOPIC = f"v3/{MQTT_USERNAME}/devices/+/up"
+TTN_USERNAME = os.getenv("TTN_USERNAME")
+TTN_PASSWORD = os.getenv("TTN_PASSWORD")
 
 INFLUX_URL = os.getenv("INFLUX_URL")
 INFLUX_TOKEN = os.getenv("INFLUX_TOKEN")
-INFLUX_BUCKET = os.getenv("INFLUX_BUCKET")
 INFLUX_ORG = os.getenv("INFLUX_ORG")
+INFLUX_BUCKET = os.getenv("INFLUX_BUCKET")
 
-def load_devices():
-    with open("devices.json", "r") as f:
-        return json.load(f)
+# 📁 Charger les devices connus
+DEVICES_FILE = "/opt/iot-infra/devices.json"
+if os.path.exists(DEVICES_FILE):
+    with open(DEVICES_FILE, "r") as f:
+        DEVICES = json.load(f)
+else:
+    DEVICES = {}
 
-def decode(dev_eui, payload):
-    devices = load_devices()
-    capteur_type = devices.get(dev_eui)
-    if not capteur_type:
-        print(f"❌ Capteur non reconnu : {dev_eui}")
-        return None
-    try:
-        module = importlib.import_module(f"decoders.{capteur_type}")
-        return module.decode(payload)
-    except Exception as e:
-        print(f"❌ Erreur décodage {capteur_type}: {e}")
-        return None
-
+# 📨 Callback de réception MQTT
 def on_message(client, userdata, msg):
     try:
-        data = json.loads(msg.payload.decode())
-        dev_eui = data["end_device_ids"]["dev_eui"]
-        payload_b64 = data["uplink_message"]["frm_payload"]
-        timestamp = data["received_at"]
+        payload = json.loads(msg.payload)
+        dev_eui = payload["end_device_ids"]["dev_eui"]
+        raw = payload["uplink_message"]["frm_payload"]
 
-        decoded = decode(dev_eui, payload_b64)
-        if decoded:
-            print(f"📥 {dev_eui} → {decoded}")
-            send_to_influx(dev_eui, decoded, timestamp)
-        else:
+        if dev_eui not in DEVICES:
+            print(f"❌ DevEUI inconnu : {dev_eui}")
+            return
+
+        decoder_name = DEVICES[dev_eui]
+        decoder_path = f"decoders.{decoder_name}"
+        decoder = import_module(decoder_path)
+
+        bytes_data = bytes.fromhex(raw)
+        decoded = decoder.decode(bytes_data)
+
+        if not decoded:
             print(f"⚠️ Aucun champ décodé pour {dev_eui}")
+            return
+
+        print(f"📥 {dev_eui} → {decoded}")
+
+        # Envoi vers InfluxDB
+        write_points(dev_eui, decoded)
+
     except Exception as e:
-        print(f"❌ Erreur réception MQTT : {e}")
+        print(f"❌ Erreur: {e}")
 
-def send_to_influx(dev_eui, data, timestamp):
-    client = InfluxDBClient(url=INFLUX_URL, token=INFLUX_TOKEN, org=INFLUX_ORG)
-    write_api = client.write_api()
-    for key, value in data.items():
-        if isinstance(value, (int, float)):
-            val = float(value)  # force float pour éviter type conflict
-            point = Point(key).tag("dev_eui", dev_eui).field("value", val).time(timestamp)
+# 💾 Écriture dans InfluxDB
+def write_points(dev_eui, fields):
+    try:
+        with InfluxDBClient(url=INFLUX_URL, token=INFLUX_TOKEN, org=INFLUX_ORG) as client:
+            write_api = client.write_api(write_options=WriteOptions(batch_size=1))
+            point = Point("iot")
+            point.tag("dev_eui", dev_eui)
+            for key, value in fields.items():
+                if isinstance(value, (int, float)):
+                    point.field(key, value)
             write_api.write(bucket=INFLUX_BUCKET, record=point)
+    except Exception as e:
+        print(f"❌ InfluxDB write error: {e}")
 
+# 🚀 Initialisation MQTT
 client = mqtt.Client()
-client.username_pw_set(MQTT_USERNAME, MQTT_PASSWORD)
+client.username_pw_set(TTN_USERNAME, TTN_PASSWORD)
 client.on_message = on_message
 
 print(f"📡 Connexion MQTT à {MQTT_HOST}...")
 client.connect(MQTT_HOST, 1883, 60)
-client.subscribe(MQTT_TOPIC)
+
+topic = f"v3/{TTN_USERNAME.split('@')[0]}/devices/+/up"
+client.subscribe(topic)
+
 client.loop_forever()
