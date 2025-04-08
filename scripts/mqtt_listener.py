@@ -30,9 +30,10 @@ else:
 # 📨 Callback de réception MQTT
 def on_message(client, userdata, msg):
     try:
+        print(f"🔎 Message brut reçu:\n{msg.payload.decode()}")
         payload = json.loads(msg.payload)
         dev_eui = payload["end_device_ids"]["dev_eui"]
-        raw = payload["uplink_message"]["frm_payload"]
+        raw = payload["uplink_message"].get("frm_payload")
 
         if dev_eui not in DEVICES:
             print(f"❌ DevEUI inconnu : {dev_eui}")
@@ -42,12 +43,20 @@ def on_message(client, userdata, msg):
         decoder_path = f"decoders.{decoder_name}"
         decoder = import_module(decoder_path)
 
-        # Corriger le padding base64 si nécessaire
-        missing_padding = len(raw) % 4
-        if missing_padding:
-            raw += '=' * (4 - missing_padding)
+        if not raw:
+            print(f"⚠️ frm_payload vide ou manquant pour {dev_eui}")
+            return
 
-        bytes_data = base64.b64decode(raw)
+        print(f"📦 frm_payload reçu pour {dev_eui}: {raw}")
+
+        try:
+            # Normaliser base64 en forçant le bon padding
+            raw += '=' * (-len(raw) % 4)
+            bytes_data = base64.b64decode(raw)
+        except Exception as e:
+            print(f"❌ Base64 decode failed: {e}")
+            return
+
         decoded = decoder.decode(bytes_data)
 
         if not decoded:
