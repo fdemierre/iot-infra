@@ -1,123 +1,73 @@
-from flask import Flask, render_template_string, request, redirect, url_for
-import os
-import json
-import re
+from flask import Flask, render_template_string
 import subprocess
-from pathlib import Path
+from influxdb_client import InfluxDBClient
+import os
+from dotenv import load_dotenv
+
+load_dotenv("/opt/iot-infra/.env")
 
 app = Flask(__name__)
 
-DEVICES_FILE = Path("/opt/iot-infra/devices.json")
-DECODER_DIR = Path("/opt/iot-infra/decoders")
+INFLUX_URL = os.getenv("INFLUX_URL")
+INFLUX_TOKEN = os.getenv("INFLUX_TOKEN")
+INFLUX_ORG = os.getenv("INFLUX_ORG")
 
-# Template HTML minimal
-TEMPLATE = """
+STATUS_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Device Manager</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <title>Status Système</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; }
+        h1 { color: #007BFF; }
+        pre { background: #f0f0f0; padding: 10px; border-radius: 5px; }
+    </style>
 </head>
-<body class="p-4">
-    <div class="container">
-        <h1 class="mb-4">📡 Device Manager</h1>
-        <form method="POST" class="row g-3">
-            <div class="col-md-6">
-                <label for="dev_eui" class="form-label">DevEUI</label>
-                <input type="text" class="form-control" id="dev_eui" name="dev_eui" required>
-            </div>
-            <div class="col-md-6">
-                <label for="device_type" class="form-label">Type de capteur</label>
-                <select class="form-select" id="device_type" name="device_type" required>
-                    {% for d in decoders %}
-                    <option value="{{ d }}">{{ d }}</option>
-                    {% endfor %}
-                </select>
-            </div>
-            <div class="col-12">
-                <button type="submit" class="btn btn-primary">Ajouter le capteur</button>
-            </div>
-        </form>
-
-        <hr>
-        <h3>📋 Devices enregistrés</h3>
-        <table class="table table-striped">
-            <thead><tr><th>DevEUI</th><th>Type</th><th></th></tr></thead>
-            <tbody>
-            {% for dev, typ in devices.items() %}
-            <tr>
-                <td>{{ dev }}</td>
-                <td>{{ typ }}</td>
-                <td><a href="/delete/{{ dev }}" class="btn btn-sm btn-danger">Supprimer</a></td>
-            </tr>
-            {% endfor %}
-            </tbody>
-        </table>
-
-        <form method="POST" action="/restart">
-            <button type="submit" class="btn btn-warning mt-4">🔄 Redémarrer le Listener MQTT</button>
-        </form>
-    </div>
+<body>
+    <h1>✨ État du système</h1>
+    <h2>🔌 Service MQTT Listener</h2>
+    <pre>{{ mqtt_status }}</pre>
+    <h2>📊 InfluxDB</h2>
+    <pre>{{ influx_status }}</pre>
 </body>
 </html>
 """
 
-# Charger les devices
+def get_mqtt_status():
+    try:
+        result = subprocess.run(
+            ["systemctl", "is-active", "mqtt_listener"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True
+        )
+        return result.stdout.strip()
+    except Exception as e:
+        return f"Erreur: {e}"
 
-def load_devices():
-    if DEVICES_FILE.exists():
-        with open(DEVICES_FILE) as f:
-            return json.load(f)
-    return {}
+def get_influx_status():
+    try:
+        with InfluxDBClient(url=INFLUX_URL, token=INFLUX_TOKEN, org=INFLUX_ORG) as client:
+            buckets = client.buckets_api().find_buckets().buckets
+            bucket_info = [f"{b.name} - {b.retention_rules[0].every_seconds}s - ID: {b.id}" for b in buckets]
 
-def save_devices(devices):
-    with open(DEVICES_FILE, "w") as f:
-        json.dump(devices, f, indent=2)
+            query = f'''from(bucket: "{buckets[0].name}")
+              |> range(start: -30d)
+              |> count()'''
+            query_api = client.query_api()
+            tables = query_api.query(query, org=INFLUX_ORG)
+            total_points = sum(row.get_value() for table in tables for row in table.records)
 
-# Créer un bucket InfluxDB
+            return f"Buckets:\n" + "\n".join(bucket_info) + f"\n\nNombre total de points: {total_points}"
+    except Exception as e:
+        return f"Erreur: {e}"
 
-def create_bucket(bucket_name):
-    result = subprocess.run([
-        "influx", "bucket", "create",
-        "--name", bucket_name,
-        "--org", os.getenv("INFLUX_ORG", "iot-org"),
-        "--token", os.getenv("INFLUX_TOKEN", "")
-    ], capture_output=True)
-    return result.returncode == 0
-
-@app.route("/", methods=["GET", "POST"])
-def index():
-    devices = load_devices()
-    decoders = [f.stem for f in DECODER_DIR.glob("*.py") if f.is_file()]
-
-    if request.method == "POST":
-        dev_eui = request.form.get("dev_eui", "").strip().upper()
-        device_type = request.form.get("device_type", "")
-
-        if not re.fullmatch(r"[0-9A-F]{16}", dev_eui):
-            return "<h3>❌ DevEUI invalide (16 caractères hex)</h3><a href='/'>Retour</a>"
-
-        devices[dev_eui] = device_type
-        save_devices(devices)
-        create_bucket(device_type)
-
-        return redirect(url_for("index"))
-
-    return render_template_string(TEMPLATE, devices=devices, decoders=decoders)
-
-@app.route("/delete/<dev_eui>")
-def delete(dev_eui):
-    devices = load_devices()
-    if dev_eui in devices:
-        del devices[dev_eui]
-        save_devices(devices)
-    return redirect(url_for("index"))
-
-@app.route("/restart", methods=["POST"])
-def restart_listener():
-    subprocess.run(["systemctl", "restart", "mqtt_listener"])  # Assumes systemd service exists
-    return redirect(url_for("index"))
+@app.route("/status")
+def status():
+    mqtt_status = get_mqtt_status()
+    influx_status = get_influx_status()
+    return render_template_string(STATUS_TEMPLATE, mqtt_status=mqtt_status, influx_status=influx_status)
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
