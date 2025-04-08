@@ -19,7 +19,8 @@ INFLUX_ORG = os.getenv("INFLUX_ORG")
 NAVBAR = """
 <nav>
   <a href="/">Gérer les capteurs</a> |
-  <a href="/status">Etat système</a>
+  <a href="/status">Etat système</a> |
+  <a href="/restart-listener">🔄 Redémarrer listener</a>
 </nav>
 <hr>
 """
@@ -35,7 +36,8 @@ INDEX_TEMPLATE = """
         table { border-collapse: collapse; width: 100%; margin-top: 20px; }
         th, td { border: 1px solid #ccc; padding: 8px; text-align: left; }
         th { background-color: #f5f5f5; }
-        input, select { padding: 6px; margin: 4px 0; width: 100%; }
+        input, select, button { padding: 8px; margin: 4px 0; width: 100%; box-sizing: border-box; }
+        form { max-width: 400px; margin-bottom: 30px; }
     </style>
 </head>
 <body>
@@ -43,7 +45,7 @@ INDEX_TEMPLATE = """
     <h1>🛠️ Gestion des capteurs</h1>
     <form method="post">
         <label for="dev_eui">DevEUI:</label>
-        <input type="text" name="dev_eui" required pattern="[A-F0-9]{16}">
+        <input type="text" name="dev_eui" required pattern="[A-F0-9]{16}" placeholder="ex: 0018B200000023E6">
         <label for="decoder">Type de capteur:</label>
         <select name="decoder">
             {% for decoder in decoders %}
@@ -122,6 +124,14 @@ def delete(dev_eui):
         del devices[dev_eui]
         save_devices(devices)
     return redirect(url_for("index"))
+
+@app.route("/restart-listener")
+def restart_listener():
+    try:
+        subprocess.run(["sudo", "systemctl", "restart", "mqtt_listener"], check=True)
+        return redirect(url_for("status"))
+    except subprocess.CalledProcessError as e:
+        return f"Erreur lors du redémarrage: {e}"
 
 def get_mqtt_status():
     try:
