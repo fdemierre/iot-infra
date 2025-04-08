@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import os
 import json
+import base64
 import paho.mqtt.client as mqtt
 from influxdb_client import InfluxDBClient, Point, WriteOptions
 from dotenv import load_dotenv
@@ -41,7 +42,12 @@ def on_message(client, userdata, msg):
         decoder_path = f"decoders.{decoder_name}"
         decoder = import_module(decoder_path)
 
-        bytes_data = bytes.fromhex(raw)
+        # Corriger le padding base64 si nécessaire
+        missing_padding = len(raw) % 4
+        if missing_padding:
+            raw += '=' * (4 - missing_padding)
+
+        bytes_data = base64.b64decode(raw)
         decoded = decoder.decode(bytes_data)
 
         if not decoded:
@@ -79,6 +85,7 @@ print(f"📡 Connexion MQTT à {MQTT_HOST}...")
 client.connect(MQTT_HOST, 1883, 60)
 
 topic = f"v3/{TTN_USERNAME}/devices/+/up"
+print(f"📡 Abonnement au topic: {topic}")
 client.subscribe(topic)
 
 client.loop_forever()
