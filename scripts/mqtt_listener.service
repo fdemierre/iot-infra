@@ -1,0 +1,13 @@
+[Unit]
+Description=MQTT Listener for TTN to InfluxDB
+After=network.target
+
+[Service]
+User=nodered
+WorkingDirectory=/opt/iot-infra
+ExecStart=/opt/iot-infra/venv/bin/python3 /opt/iot-infra/mqtt_listener.py
+Restart=always
+EnvironmentFile=/opt/iot-infra/.env
+
+[Install]
+WantedBy=multi-user.target
