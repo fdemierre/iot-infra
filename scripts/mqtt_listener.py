@@ -64,10 +64,10 @@ def on_message(client, userdata, msg):
         frm_payload = uplink.get("frm_payload")
         
         # Filtrage par f_port (ici on traite uniquement les messages sur le port 1)
-        fport = uplink.get("f_port", 0)
-        if fport != 1:
-            logging.info(f"Ignoré message sur le port {fport} pour {dev_eui}")
-            return
+        #fport = uplink.get("f_port", 0)
+        #if fport != 1:
+        #    logging.info(f"Ignoré message sur le port {fport} pour {dev_eui}")
+        #    return
         
         if dev_eui not in DEVICES:
             logging.warning(f"DevEUI inconnu : {dev_eui}")
